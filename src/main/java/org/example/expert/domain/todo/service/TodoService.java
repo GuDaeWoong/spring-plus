@@ -16,6 +16,11 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.format.DateTimeFormatter;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 @Service
 @RequiredArgsConstructor
@@ -24,6 +29,8 @@ public class TodoService {
 
     private final TodoRepository todoRepository;
     private final WeatherClient weatherClient;
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
 
     @Transactional
     public TodoSaveResponse saveTodo(AuthUser authUser, TodoSaveRequest todoSaveRequest) {
@@ -48,10 +55,35 @@ public class TodoService {
         );
     }
 
-    public Page<TodoResponse> getTodos(int page, int size) {
+    public Page<TodoResponse> getTodos(int page, int size, String weather, String startDateStr, String endDateStr) {
         Pageable pageable = PageRequest.of(page - 1, size);
 
-        Page<Todo> todos = todoRepository.findAllByOrderByModifiedAtDesc(pageable);
+        LocalDate startDate = null;
+        if (startDateStr != null && !startDateStr.isEmpty()) {
+            startDate = LocalDate.parse(startDateStr, DATE_FORMATTER);
+        }
+
+        LocalDate endDate = null;
+        if (endDateStr != null && !endDateStr.isEmpty()) {
+            endDate = LocalDate.parse(endDateStr, DATE_FORMATTER);
+        }
+
+        LocalDateTime startDateTime = null;
+        if (startDate != null) {
+            startDateTime = startDate.atStartOfDay();
+        }
+
+        LocalDateTime endDateTime = null;
+        if (endDate != null) {
+            endDateTime = endDate.atTime(LocalTime.MAX);
+        }
+
+        Page<Todo> todos = todoRepository.findTodosByConditions(
+                pageable,
+                weather,
+                startDateTime,
+                endDateTime
+                );
 
         return todos.map(todo -> new TodoResponse(
                 todo.getId(),
