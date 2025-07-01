@@ -23,7 +23,6 @@ import java.io.IOException;
 @RequiredArgsConstructor
 // Been 등록
 @Component
-//public class JwtFilter implements Filter {
 public class JwtFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
