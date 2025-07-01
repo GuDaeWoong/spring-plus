@@ -23,6 +23,8 @@ public class SecurityConfig {
         http
                 // CSRF 보호 비활성화 (JWT 토큰 기반 인증 사용)
                 .csrf(AbstractHttpConfigurer::disable)
+                .httpBasic(AbstractHttpConfigurer::disable) // BasicAuthenticationFilter 비활성화
+                .formLogin(AbstractHttpConfigurer::disable) // UsernamePasswordAuthenticationFilter, DefaultLoginPageGeneratingFilter 비활성화
                 // 세션 관리 정책: STATELESS (서버에 세션 저장 안함)
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -35,11 +37,7 @@ public class SecurityConfig {
                         .requestMatchers("/admin/**").hasRole("ADMIN")
                         // 나머지는 인증 필요
                         .anyRequest().authenticated()
-                );
-
-        // JwtFilter를 Spring Security의 필터 체인에 추가
-        // 사용자 인증 정보가 JWT를 통해 우선순위 설정
-        http.addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+                ).addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
