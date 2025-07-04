@@ -223,3 +223,169 @@ public interface TodoRepository extends JpaRepository<Todo, Long>, TodoCustomRep
 ### 2-8. 해결 완료
 - Todo를 조회할 때 연관된 User 정보도 fetchJoin을 통해 한번의 쿼리로 가져오게되어 N+1 문제를 해결
 
+<br>
+<br>
+
+### 2-9. 문제 인식 및 정의
+- Filter와 Argument Resolver를 사용하여 접근 권한 및 사용자 권한 관리를 하고 있습니다.
+- Spring Security로 전환하고, 기존의 접근 권한 및 사용자 권한 기능은 그대로 유지하되 권한 관리는 Spring Security의 기능을 활용하는 것
+- 기존의 토큰 기반 인증 방식(JWT)은 그대로 유지
+
+### 2-9. 해결 방안
+- Spring Security 의존성 추가
+```
+  implementation 'org.springframework.boot:spring-boot-starter-security'
+```
+- SecurityConfig 생성
+  - CSRF 비활성화
+  - BasicAuthenticationFilter 비활성화
+  - UsernamePasswordAuthenticationFilter, DefaultLoginPageGeneratingFilter 비활성화
+  - 세션 관리 정책: STATELESS (서버에 세션 저장 안함)
+  - 인가 규칙 설정
+
+```
+@Configuration
+@EnableWebSecurity //시큐리티 활성화
+@RequiredArgsConstructor
+public class SecurityConfig {
+
+    private final JwtFilter jwtFilter;
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                // CSRF 보호 비활성화 (JWT 토큰 기반 인증 사용)
+                .csrf(AbstractHttpConfigurer::disable)
+                .httpBasic(AbstractHttpConfigurer::disable) // BasicAuthenticationFilter 비활성화
+                .formLogin(AbstractHttpConfigurer::disable) // UsernamePasswordAuthenticationFilter, DefaultLoginPageGeneratingFilter 비활성화
+                // 세션 관리 정책: STATELESS (서버에 세션 저장 안함)
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // 접근 권한 설정
+                .authorizeHttpRequests(authorize -> authorize
+                        //허용 경로지정
+                        // "/auth"로 시작하는 모든 요청은 인증 없이 허용 (회원가입, 로그인)
+                        .requestMatchers("/auth/**").permitAll()
+                        // "/admin"으로 시작하는 요청은 'ADMIN' 역할을 가진 사용자만 허용
+                        .requestMatchers("/admin/**").hasRole("ADMIN")
+                        // 나머지는 인증 필요
+                        .anyRequest().authenticated()
+                ).addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+
+        return http.build();
+    }
+}
+```
+
+- JwtFilter를 OncePerRequestFilter로 변경
+  - 기존 Filter 인터페이스를 상속받던 JwtFilter를 Spring Security가 제공하는 OncePerRequestFilter로 변경
+    * HTTP 요청당 한 번만 필터를 실행하도록 보장하고 Spring Security의 필터 체인에 통합하기 좋다고 합니다.
+    * -> FilterConfig 제거
+```
+@Slf4j
+@RequiredArgsConstructor
+@Component // Spring Bean으로 등록
+public class JwtFilter extends OncePerRequestFilter { 
+
+    private final JwtUtil jwtUtil;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+
+        String bearerJwt = request.getHeader("Authorization");
+
+        if (bearerJwt == null || !bearerJwt.startsWith("Bearer ")) {
+            response.sendError(HttpServletResponse.SC_BAD_REQUEST, "JWT 토큰이 필요합니다.");
+            return;
+        }
+
+        try {
+            String jwt = bearerJwt.substring(7); // "Bearer " 제거
+            Claims claims = jwtUtil.extractClaims(jwt);
+
+            if (claims == null) {
+                response.sendError(HttpServletResponse.SC_BAD_REQUEST, "잘못된 JWT 토큰입니다.");
+                return;
+            }
+
+            // 클레임에서 사용자 정보 추출
+            Long id = Long.parseLong(claims.getSubject());
+            String email = claims.get("email", String.class);
+            String userRoleString = claims.get("userRole", String.class);
+            String nickname = claims.get("nickname", String.class);
+            UserRole userRole = UserRole.valueOf(userRoleString);
+
+            // AuthUser 객체 생성 
+            AuthUser authUser = new AuthUser(id, email, userRole, nickname);
+
+            // Spring Security의 Authentication 객체 생성
+            UsernamePasswordAuthenticationToken authentication =
+                    new UsernamePasswordAuthenticationToken(
+                            authUser, null, authUser.getAuthorities());
+
+            // SecurityContextHolder에 Authentication 객체를 설정
+            SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        ...
+    }
+}
+```
+- AuthUser에 UserDetails 인터페이스 구현
+  - AuthUser 클래스가 Spring Security에서 사용자 상세 정보를 가져올 수 있게 구현
+  - 
+```
+@Getter
+public class AuthUser implements UserDetails {
+
+    ...
+    
+    // 권환 반환
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return Collections.singleton(userRole.getGrantedAuthority());
+    }
+
+    @Override
+    public String getPassword() {
+        return null;
+    }
+
+    @Override
+    public String getUsername() {
+        return email;
+    }
+}
+```
+
+- @AuthenticationPrincipal 어노테이션 활용
+  - 기존 @Auth 커스텀 Argument Resolver 대신해서 Spring Security에서 제공하는 @AuthenticationPrincipal 어노테이션을 사용해서 인증된 값을 주입받을 수 있다
+    - -> WebConfig, AuthUserArgumentResolver 제거
+
+
+<br>
+<br>
+
+
+### 3-10. 문제 인식 및 정의
+- 검색 api 작성
+- 검색 조건
+    - 검색 키워드로 일정의 제목을 검색
+        - 제목은 부분적으로 일치해도 검색이 가능
+    - 일정의 생성일 범위로 검색
+        - 일정을 생성일 최신순으로 정렬해주세요.
+    - 담당자의 닉네임으로도 검색이 가능
+        - 닉네임은 부분적으로 일치해도 검색이 가능
+- 다음의 내용을 포함해서 검색 결과를 반환
+    - 일정에 대한 모든 정보가 아닌, 제목만 반환
+    - 해당 일정의 담당자 수를 반환
+    - 해당 일정의 총 댓글 개수를 반환
+- 검색 결과는 페이징 처리되어 반환
+
+### 3-10. 해결 방안
+- SearchTodoConditionRequest
+  - keyword, nickname, startDate, endDate
+- BooleanExpression 사용
+  - QueryDSL에서 WHERE 조건을 표현하는 객체
+  - .where() 절에 조건을 걸고 싶을 때 사용 가능
+

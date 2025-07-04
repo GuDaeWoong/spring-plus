@@ -32,12 +32,12 @@ public class AuthUser implements UserDetails {
 
     @Override
     public String getPassword() {
-        return email;
+        return null;
     }
 
     @Override
     public String getUsername() {
-        return null;
+        return email;
     }
 
 }
