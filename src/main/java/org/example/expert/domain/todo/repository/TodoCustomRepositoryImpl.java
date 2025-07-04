@@ -92,7 +92,7 @@ public class TodoCustomRepositoryImpl implements TodoCustomRepository{
     }
 
     private BooleanExpression titleContains(String keyword) {
-        if (keyword != null || !keyword.isBlank()) {
+        if (keyword != null || keyword.isBlank()) {
             return null;
         }
         return QTodo.todo.title.containsIgnoreCase(keyword);

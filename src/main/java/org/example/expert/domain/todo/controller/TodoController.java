@@ -45,7 +45,7 @@ public class TodoController {
         return ResponseEntity.ok(todoService.getTodo(todoId));
     }
 
-    @GetMapping("/secrch")
+    @GetMapping("/search")
     public ResponseEntity<Page<SearchTodoResponse>> searchTodo(
             SearchTodoConditionRequest conditionRequest,
             Pageable pageable) {
